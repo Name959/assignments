@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DINOv2 液态智能搜图</title>
+    <style>
+        :root {
+            --primary-color: #6a11cb;
+            --secondary-color: #2575fc;
+            /* [新增] 玻璃态相关变量 */
+            --glass-bg: rgba(255, 255, 255, 0.25);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --glass-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            --text-main: #2d3436;
+            --text-sub: #636e72;
+            --radius: 24px;
+        }
+
+        .group-move-select {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            z-index: 2;
+            padding: 4px 8px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255,255,255,0.9);
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+
+        .favorite-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255,255,255,0.9);
+            border: none;
+            border-radius: 50%;
+            width: 38px;
+            height: 38px;
+            font-size: 18px;
+            cursor: pointer;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+            z-index: 2;   /* 永远在 overlay 之上 */
+        }
+
+        .favorite-btn.active {
+            background: #ff4757;
+            color: white;
+        }
+
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            /* [新增] 充满活力的渐变背景 */
+            background: linear-gradient(135deg, #f6d365 0%, #fda085 50%, #a1c4fd 100%);
+            min-height: 100vh;
+            color: var(--text-main);
+            margin: 0;
+            padding: 40px 20px;
+            line-height: 1.6;
+            background-attachment: fixed; /* 背景固定 */
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* [新增] 通用玻璃态样式类 */
+        .glass {
+            background: var(--glass-bg);
+            box-shadow: var(--glass-shadow);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-radius: var(--radius);
+            border: 1px solid var(--glass-border);
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 50px;
+        }
+
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 10px;
+            /* 文字渐变效果 */
+            background: linear-gradient(to right, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 800;
+            letter-spacing: -1px;
+        }
+
+        p.subtitle {
+            color: var(--text-main);
+            font-size: 1.2rem;
+            opacity: 0.8;
+        }
+
+        /* 上传区域 - 应用玻璃态 */
+        .upload-section {
+            padding: 50px;
+            text-align: center;
+            margin-bottom: 40px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        .upload-section:hover {
+             transform: translateY(-5px);
+             box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.25);
+        }
+
+        .upload-box {
+            border: 3px dashed rgba(255, 255, 255, 0.6);
+            border-radius: 16px;
+            padding: 40px 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(255,255,255,0.1);
+        }
+
+        .upload-box:hover {
+            border-color: var(--primary-color);
+            background-color: rgba(255, 255, 255, 0.3);
+        }
+
+        .icon-upload {
+            width: 70px;
+            height: 70px;
+            fill: var(--primary-color);
+            margin-bottom: 20px;
+            opacity: 0.8;
+        }
+
+        #preview-container {
+            margin-top: 30px;
+            display: none;
+            padding: 15px;
+            background: rgba(255,255,255,0.3);
+            border-radius: 16px;
+            display: inline-block;
+        }
+
+        #preview {
+            max-height: 250px;
+            border-radius: 12px;
+            box-shadow: var(--shadow-md);
+            display: block;
+        }
+
+        /* 加载动画优化 */
+        .loader-container {
+            display: none; /* 默认隐藏 */
+            margin-top: 30px;
+        }
+        .loader {
+            margin: 0 auto 15px;
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+        }
+
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .loading-text {
+            color: var(--text-main);
+            font-weight: 500;
+        }
+
+        /* [新增] 结果控制区（头部信息 + 过滤器） */
+        .results-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            padding: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .results-header h3 { margin: 0; font-size: 1.5rem;}
+        
+        /* [新增] 统计信息样式 */
+        .stats-info {
+            font-size: 0.9rem;
+            color: var(--text-main);
+            background: rgba(255,255,255,0.3);
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            margin-top: 5px;
+        }
+
+        /* [新增] 过滤器控件样式 */
+        .filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255,255,255,0.3);
+            padding: 10px 20px;
+            border-radius: 30px;
+        }
+        
+        input[type=range] {
+            accent-color: var(--primary-color);
+            cursor: pointer;
+        }
+
+        /* 结果网格 */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 30px;
+        }
+
+        /* 卡片 - 应用玻璃态 */
+        .card {
+            overflow: hidden;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .card:hover {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 15px 35px rgba(0,0,0,0.2);
+        }
+
+        .card-img-wrapper {
+            width: 100%;
+            height: 220px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .card img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.5s ease;
+        }
+        
+        /* [新增] 悬停时显示“找相似”按钮层 */
+        .card-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.4);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            z-index: 1;              /* 找相似层 */
+            pointer-events: none;   /* 默认不拦截鼠标 */
+        }
+
+        .card:hover .card-overlay {
+            opacity: 1;
+            pointer-events: auto;   /* 只有显示时才接管鼠标 */
+        }
+
+
+        /* [新增] “找相似”按钮样式 */
+        .btn-find-similar {
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            padding: 10px 20px;
+            border-radius: 30px;
+            color: var(--primary-color);
+            font-weight: bold;
+            cursor: pointer;
+            transform: translateY(20px);
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .card:hover .btn-find-similar {
+            transform: translateY(0);
+        }
+        
+        .btn-find-similar:hover {
+             background: var(--primary-color);
+             color: white;
+        }
+
+        .card-info {
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.1); /* 轻微的背景色区分 */
+        }
+
+        .score-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            backdrop-filter: blur(5px);
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+        }
+
+        .score-high { background-color: rgba(46, 213, 115, 0.2); color: #20bf6b; }
+        .score-mid  { background-color: rgba(255, 165, 2, 0.2); color: #fa8231; }
+        .score-low  { background-color: rgba(255, 71, 87, 0.2); color: #eb3b5a; }
+
+        .file-name {
+            font-size: 0.85rem;
+            color: var(--text-main);
+            font-weight: 500;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2rem; }
+            .upload-section { padding: 30px 20px; }
+            .results-controls { flex-direction: column; align-items: flex-start; }
+            .filter-controls { width: 100%; justify-content: space-between; box-sizing: border-box;}
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>🔍 DINOv2 液态视觉搜索</h1>
+            <p class="subtitle">体验基于 Meta AI DINOv2 的下一代图像检索技术</p>
+        
+            <div style="margin-top:20px;">
+                <button onclick="toggleFavoriteSection()" class="btn-find-similar">
+                    ❤️ 查看收藏
+                </button>
+            </div>
+        </header>
+        
+
+        <section class="upload-section glass">
+            <div class="upload-box" onclick="document.getElementById('fileInput').click()">
+                <svg class="icon-upload" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 16V7.85l-2.6 2.6L7 9l5-5 5 5-1.4 1.45-2.6-2.6V16h-2zm-5 4c-1.1 0-2-.9-2-2v-5h2v5h12v-5h2v5c0 1.1-.9 2-2 2H6z"/></svg>
+                <p style="margin: 0; font-weight: 600; font-size: 1.1rem;">点击上传图片</p>
+                <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 8px;">支持 JPG, PNG / 支持拖拽</p>
+                <input type="file" id="fileInput" accept="image/*" style="display: none" onchange="handleUpload(this)">
+            </div>
+
+            <div id="preview-container" class="glass" style="display: none;">
+                <img id="preview" src="" alt="预览图">
+            </div>
+            
+            <div id="loader-container" class="loader-container">
+                <div class="loader"></div>
+                <p id="loading-text" class="loading-text">正在进行 DINOv2 特征提取与全库比对...</p>
+            </div>
+        </section>
+
+        <section id="favorite-section" style="display:none; margin-bottom:40px;">
+            <div class="results-controls glass">
+                <div class="results-header">
+                    <h3>❤️ 我的收藏</h3>
+                </div>
+            
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <select id="groupSelect" onchange="switchGroup(this.value)"></select>
+            
+                    <input id="newGroupInput" placeholder="新分组名" style="width:120px;">
+                    <button onclick="createGroup()" class="btn-find-similar">➕ 新建</button>
+            
+                    <button onclick="toggleFavoriteSection()" class="btn-find-similar">
+                        关闭
+                    </button>
+                </div>
+            </div>
+            
+            <div id="favorite-results" class="grid"></div>
+        </section>
+        
+
+        <section id="result-section" style="display: none;">
+            <div class="results-controls glass">
+                <div class="results-header">
+                    <h3>搜索结果</h3>
+                    <span id="stats-info" class="stats-info"></span>
+                </div>
+                
+                <div class="filter-controls">
+                    <!-- 相似度控制 -->
+                    <label>最低相似度:</label>
+                    <input type="range" id="thresholdRange" min="0" max="100" value="0" step="1">
+                    <input type="number" id="thresholdInput" min="0" max="100" value="0" style="width:70px;">
+                    <span>%</span>
+                
+                    <!-- 数量控制 -->
+                    <label style="margin-left:15px;">显示数量:</label>
+                    <input type="number" id="limitInput" min="1" max="15" value="10" style="width:60px;">
+                    <span>/ 15</span>
+                </div>
+                
+            </div>
+            
+            <div id="results" class="grid"></div>
+        </section>
+    </div>
+
+    <script>
+        // 收藏分组数据
+        let favoriteGroups = JSON.parse(localStorage.getItem("favoriteGroups") || "{}");
+
+        if (Object.keys(favoriteGroups).length === 0) {
+            favoriteGroups["默认收藏"] = [];
+        }
+
+        let currentGroup = Object.keys(favoriteGroups)[0];
+
+        saveFavorites();
+
+        const API_URL = ""; 
+        
+        // [新增] 全局变量存储原始 API 数据，用于前端过滤
+        let currentApiResponse = null;
+        
+        // [新增] 图片损毁检测缓存 (url -> boolean: true表示损毁)
+        let imageCorruptionCache = new Map();
+
+        // 收藏数据
+        let favorites = JSON.parse(localStorage.getItem("favorites") || "[]");
+
+        // 判断是否已收藏
+        function isFavorite(url) {
+            return favoriteGroups[currentGroup].some(item => item.url === url);
+        }
+
+        // 切换收藏状态
+        function toggleFavoriteSection() {
+            const section = document.getElementById("favorite-section");
+            if (section.style.display === "none") {
+                refreshGroupSelect();
+                renderFavorites();
+                section.style.display = "block";
+            } else {
+                section.style.display = "none";
+            }
+        }
+
+
+        // 显示/隐藏收藏区
+        function toggleFavorite(item) {
+            const group = favoriteGroups[currentGroup];
+
+            const idx = group.findIndex(f => f.url === item.url);
+            if (idx >= 0) {
+                group.splice(idx, 1);
+            } else {
+                group.push(item);
+            }
+
+            saveFavorites();
+            filterResults();    
+            renderFavorites();
+        }
+
+        // 页面加载完成后设置监听器
+        document.addEventListener('DOMContentLoaded', () => {
+        const rangeInput = document.getElementById('thresholdRange');
+        const numberInput = document.getElementById('thresholdInput');
+        const limitInput = document.getElementById('limitInput');
+
+        // 滑块 → 数字框
+        rangeInput.addEventListener('input', (e) => {
+            numberInput.value = e.target.value;
+            filterResults();
+        });
+
+
+        // 数字框 → 滑块
+        numberInput.addEventListener('input', (e) => {
+            let v = parseInt(e.target.value || 0);
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            e.target.value = v;
+            rangeInput.value = v;
+            filterResults();
+        });
+
+        // 数量限制输入
+        limitInput.addEventListener('input', (e) => {
+            let v = parseInt(e.target.value || 1);
+            if (v < 1) v = 1;
+            if (v > 15) v = 15;
+            e.target.value = v;
+            filterResults();
+        });
+    });
+
+
+        // 处理文件上传搜索 (接口 1)
+        async function handleUpload(input) {
+            const file = input.files[0];
+            if (!file) return;
+            
+            // UI 重置
+            resetUIBeforeSearch();
+            
+            // 显示预览
+            const preview = document.getElementById('preview');
+            preview.src = URL.createObjectURL(file);
+            document.getElementById('preview-container').style.display = 'inline-block';
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_URL}/search`, { method: 'POST', body: formData });
+                await processApiResponse(response);
+            } catch (error) {
+                handleError(error);
+            } finally {
+                hideLoader();
+            }
+        }
+
+        // [新增] 处理“找相似”路径搜索 (接口 2)
+        async function searchByPath(imagePath) {
+            // UI 重置
+            resetUIBeforeSearch();
+            
+            // 显示预览 (直接使用服务器上的图片作为预览)
+            const preview = document.getElementById('preview');
+            preview.src = API_URL + imagePath;
+            document.getElementById('preview-container').style.display = 'inline-block';
+
+            try {
+                const response = await fetch(`${API_URL}/search_by_path`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_path: imagePath }) 
+                });
+                await processApiResponse(response);
+            } catch (error) {
+                handleError(error);
+            } finally {
+                hideLoader();
+            }
+        }
+        
+        // --- 通用辅助函数 ---
+
+        function resetUIBeforeSearch() {
+            document.getElementById('result-section').style.display = 'none';
+            document.getElementById('results').innerHTML = '';
+            document.getElementById('loader-container').style.display = 'block';
+
+            // 重置过滤器
+            document.getElementById('thresholdRange').value = 0;
+            document.getElementById('thresholdInput').value = 0;
+            document.getElementById('limitInput').value = 10;
+        }
+
+        
+        function hideLoader() {
+             document.getElementById('loader-container').style.display = 'none';
+        }
+
+        function handleError(error) {
+            console.error(error);
+            alert(`❌ 错误: ${error.message}`);
+        }
+
+        // [新增] 检测图片是否损毁
+        function checkImageCorrupted(imageUrl) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                const timeout = setTimeout(() => {
+                    img.onload = null;
+                    img.onerror = null;
+                    resolve(true); // 超时视为损毁
+                }, 5000); // 5秒超时
+
+                img.onload = () => {
+                    clearTimeout(timeout);
+                    resolve(false); // 图片正常
+                };
+
+                img.onerror = () => {
+                    clearTimeout(timeout);
+                    resolve(true); // 图片损毁
+                };
+
+                img.src = API_URL + imageUrl;
+            });
+        }
+
+        // [新增] 批量检测损毁图片（自动过滤）
+        async function filterCorruptedImages(images) {
+            const validImages = [];
+            const checkPromises = images.map(async (item) => {
+                // 检查缓存
+                if (imageCorruptionCache.has(item.url)) {
+                    const isCorrupted = imageCorruptionCache.get(item.url);
+                    if (!isCorrupted) {
+                        validImages.push(item);
+                    }
+                    return { item, isCorrupted };
+                }
+
+                // 未缓存，进行检测
+                const isCorrupted = await checkImageCorrupted(item.url);
+                imageCorruptionCache.set(item.url, isCorrupted); // 缓存结果
+                
+                if (!isCorrupted) {
+                    validImages.push(item);
+                }
+                return { item, isCorrupted };
+            });
+
+            await Promise.all(checkPromises);
+            return validImages;
+        }
+
+        // [新增] 统一处理 API 响应
+        async function processApiResponse(response) {
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.detail || "请求失败");
+            }
+            
+            const data = await response.json();
+            // [重要] 保存原始数据到全局变量
+            currentApiResponse = data;
+            
+            // [新增] 清空图片检测缓存（新搜索结果，可能有新图片）
+            imageCorruptionCache.clear();
+            
+            // [新增] 更新统计信息显示
+            const stats = data.stats;
+            const statsText = `⚡ 耗时 ${stats.duration_ms}ms | 📚 库容量 ${stats.total_indexed.toLocaleString()} 张`;
+            document.getElementById('stats-info').innerText = statsText;
+
+            // [新增] 自动过滤掉损毁的图片
+            currentApiResponse.results = await filterCorruptedImages(data.results);
+
+            // 初次渲染（不过滤）
+            filterResults();
+            document.getElementById('result-section').style.display = 'block';
+        }
+
+        // [新增] 根据滑动条过滤结果
+        function filterResults() {
+            if (!currentApiResponse || !currentApiResponse.results) return;
+            
+            const threshold = parseInt(document.getElementById('thresholdRange').value) / 100;
+            const limit = parseInt(document.getElementById('limitInput').value) || 10;
+
+            // 先按相似度过滤
+            let filteredImages = currentApiResponse.results.filter(item => item.score >= threshold);
+
+            // [新增] 自动使用缓存结果过滤掉损毁的图片
+            filteredImages = filteredImages.filter(item => {
+                const isCorrupted = imageCorruptionCache.get(item.url);
+                // 如果已检测且未损毁，保留；如果未检测，暂时保留（等待检测）
+                return isCorrupted === false || isCorrupted === undefined;
+            });
+
+            // 再按数量截断
+            filteredImages = filteredImages.slice(0, limit);
+
+            renderResults(filteredImages);
+        }
+
+        function renderFavorites() {
+            refreshGroupSelect();
+
+            const container = document.getElementById("favorite-results");
+            container.innerHTML = "";
+
+            const group = favoriteGroups[currentGroup];
+
+            if (!group || group.length === 0) {
+                container.innerHTML = '<p style="grid-column:1/-1;text-align:center;">该分组暂无收藏</p>';
+                return;
+            }
+
+            group.forEach((item, index) => {
+                const cleanName = item.url.split('/').pop();
+                const div = document.createElement("div");
+                div.className = "card glass";
+                div.draggable = true;
+
+                div.ondragstart = e => {
+                    e.dataTransfer.setData("index", index);
+                };
+
+                div.ondragover = e => e.preventDefault();
+
+                div.ondrop = e => {
+                    const from = e.dataTransfer.getData("index");
+                    const to = index;
+
+                    const moved = group.splice(from, 1)[0];
+                    group.splice(to, 0, moved);
+
+                    saveFavorites();
+                    renderFavorites();
+                };
+
+                div.innerHTML = `
+                    <div class="card-img-wrapper">
+                        <img src="${API_URL}${item.url}" loading="lazy">
+
+                        <!-- 取消收藏 -->
+                        <button class="favorite-btn active"
+                            onclick='toggleFavorite(${JSON.stringify(item)})'>
+                            ❤️
+                        </button>
+
+                        <!-- 移动分组 -->
+                        <select class="group-move-select"
+                            onchange="moveToGroup('${item.url}', this.value)">
+                        </select>
+
+                        <div class="card-overlay">
+                            <button class="btn-find-similar" onclick="searchByPath('${item.url}')">
+                                🔍 找相似
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-info">
+                        <span class="file-name">${cleanName}</span>
+                    </div>
+                `;
+
+                // 填充分组下拉框
+                const select = div.querySelector(".group-move-select");
+                // 添加默认占位选项
+                const defaultOpt = document.createElement("option");
+                defaultOpt.value = "";
+                defaultOpt.innerText = "移动到...";
+                defaultOpt.selected = true;
+                select.appendChild(defaultOpt);
+                
+                // 添加其他分组选项
+                let hasOtherGroups = false;
+                Object.keys(favoriteGroups).forEach(groupName => {
+                    if (groupName === currentGroup) return;
+                    hasOtherGroups = true;
+
+                    const opt = document.createElement("option");
+                    opt.value = groupName;
+                    opt.innerText = groupName;
+                    select.appendChild(opt);
+                });
+                
+                // 如果没有其他分组，禁用下拉框
+                if (!hasOtherGroups) {
+                    select.disabled = true;
+                    defaultOpt.innerText = "无其他分组";
+                }
+
+
+
+                container.appendChild(div);
+            });
+        }
+
+
+        function saveFavorites() {
+            localStorage.setItem("favoriteGroups", JSON.stringify(favoriteGroups));
+        }
+
+
+        function refreshGroupSelect() {
+            const select = document.getElementById("groupSelect");
+            select.innerHTML = "";
+
+            Object.keys(favoriteGroups).forEach(name => {
+                const opt = document.createElement("option");
+                opt.value = name;
+                opt.innerText = name;
+                if (name === currentGroup) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function createGroup() {
+            const input = document.getElementById("newGroupInput");
+            const name = input.value.trim();
+            if (!name) return;
+
+            if (favoriteGroups[name]) {
+                alert("分组已存在");
+                return;
+            }
+
+            favoriteGroups[name] = [];
+            currentGroup = name;
+            saveFavorites();
+            input.value = ""; // 清空输入框
+            refreshGroupSelect();
+            renderFavorites();
+        }
+
+        function switchGroup(name) {
+            currentGroup = name;
+            renderFavorites();
+        }
+
+        function moveToGroup(url, targetGroup) {
+            if (!targetGroup) return;
+
+            const fromList = favoriteGroups[currentGroup];
+            const toList = favoriteGroups[targetGroup];
+
+            if (!fromList || !toList) return;
+
+            const index = fromList.findIndex(item => item.url === url);
+            if (index === -1) return;
+
+            // 移除
+            const item = fromList.splice(index, 1)[0];
+
+            // 加入目标分组
+            toList.push(item);
+
+            saveFavorites();
+            renderFavorites();
+            
+            // 重置所有下拉框到默认状态
+            document.querySelectorAll('.group-move-select').forEach(select => {
+                select.value = '';
+            });
+        }
+
+
+
+
+        function renderResults(images) {
+            const container = document.getElementById('results');
+            container.innerHTML = ''; // 清空现有内容
+            
+            if (!images || images.length === 0) {
+                container.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: #fff; font-weight:500; background: rgba(0,0,0,0.2); padding: 20px; border-radius: 16px;">当前过滤条件下未找到相似图片</p>';
+                return;
+            }
+
+            images.forEach(item => {
+                const div = document.createElement('div');
+                // 卡片添加 glass 类
+                div.className = 'card glass';
+                
+                let pillClass = 'score-low';
+                if (item.score > 0.8) pillClass = 'score-high';
+                else if (item.score > 0.5) pillClass = 'score-mid';
+                
+                const cleanName = item.url.split('/').pop();
+
+                // [修改] HTML 结构增加了叠加层和“找相似”按钮
+                const favActive = isFavorite(item.url) ? "active" : "";
+
+                div.innerHTML = `
+                    <div class="card-img-wrapper">
+                        <img src="${API_URL}${item.url}" loading="lazy" alt="${cleanName}">
+
+                        <button class="favorite-btn ${favActive}"
+                            onclick='toggleFavorite(${JSON.stringify(item)})'>
+                            ❤️
+                        </button>
+
+                        <div class="card-overlay">
+                            <button class="btn-find-similar" onclick="searchByPath('${item.url}')">
+                                🔍 找相似
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-info">
+                        <span class="file-name" title="${cleanName}">${cleanName}</span>
+                        <span class="score-pill ${pillClass}">
+                            ${(item.score * 100).toFixed(1)}%
+                        </span>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+    </script>
+</body>
+</html>
